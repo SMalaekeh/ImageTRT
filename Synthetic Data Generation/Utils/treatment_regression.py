@@ -8,7 +8,7 @@ from PIL import Image
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-import load_and_resize
+from Utils.load_and_resize import load_and_resize
 import matplotlib.pyplot as plt
 
 def process_scenes_logistic(
