@@ -96,7 +96,7 @@ def logistic_process(
     lr = pipe.named_steps['logreg']
     coefs = np.hstack([lr.intercept_, lr.coef_.flatten()])
     names = ['Intercept', 'DEM', 'Capital']
-    coeff_file = results_dir / 'logistic_coeffs.txt'
+    coeff_file = results_dir / 'treatment_logistic_coeffs.txt'
     with open(coeff_file, 'w') as f:
         for name, val in zip(names, coefs):
             f.write(f"{name}: {val:.6f}\n")
@@ -154,7 +154,7 @@ def logistic_process(
     plt.tight_layout(rect=[0, 0, 1, 0.95])
 
     # Save
-    pdf_path = results_dir / f"scene_{scene_id}_logistic_maps.pdf"
+    pdf_path = results_dir / f"scene_{scene_id}_treatment_maps.pdf"
     fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
     plt.close(fig)
     if verbose:

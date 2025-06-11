@@ -2,13 +2,12 @@ import os
 import random
 import logging
 from pathlib import Path
-
 import numpy as np
 from PIL import Image
 from Utils.load_and_resize import load_and_resize
 import matplotlib.pyplot as plt
 
-def generate_synthetic_wetland(
+def generate_synthetic_treatment(
     scene_ids: list[str],
     folders: dict[str, str],
     logit_pipe,
