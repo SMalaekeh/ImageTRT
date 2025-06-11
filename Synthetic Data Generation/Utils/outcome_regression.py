@@ -11,10 +11,10 @@ from sklearn.linear_model import LogisticRegression
 from Utils.load_and_resize import load_and_resize
 import matplotlib.pyplot as plt
 
-def logistic_process(
+def regression_process(
     scene_ids: list[str],
     folders: dict[str, str],
-    target_shape: tuple[int, int] = (256, 256),
+    target_shape: tuple[int, int] = (25, 25),
     threshold: float = 0.5,
     results_dir: str | None = None,
     regularization_C: float = 1.0,
