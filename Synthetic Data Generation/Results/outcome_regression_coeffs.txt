@@ -1,0 +1,3 @@
+Intercept: 2.671875
+DEM: -0.426829
+Capital: 1.433656

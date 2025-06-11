@@ -93,7 +93,7 @@ def generate_synthetic_treatment(
             ax2.imshow(synth, cmap='gray'); ax2.axis('off'); ax2.set_title(f"Synthetic {sid}")
             fig.suptitle(f"{sid} — {noise_type}", fontsize=16)
             plt.tight_layout(rect=[0,0,1,0.93])
-            pdf_out = results_dir / f"{sid}_comparison_{noise_type}.pdf"
+            pdf_out = results_dir / f"{sid}_treatment_comparison_{noise_type}.pdf"
             fig.savefig(pdf_out, bbox_inches='tight')
             plt.close(fig)
 

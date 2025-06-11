@@ -69,8 +69,8 @@ def generate_synthetic_outcome(
 
         pred = pred_flat.reshape(target_shape).astype(np.float32)
 
-        # save actual and synthetic as 32-bit TIFF
-        synth_tif  = results_dir / f"scene_{sid}_synthetic_{noise_type}.tiff"
+        # save synthetic as 32-bit TIFF
+        synth_tif  = outcome_dir / f"scene_{sid}_synthetic_{noise_type}.tiff"
         Image.fromarray(pred,   mode='F').save(synth_tif)
 
         logging.info(f"[{sid}] Saved synthetic → {synth_tif.name}")
@@ -91,7 +91,7 @@ def generate_synthetic_outcome(
             fig.suptitle(f"{sid}: Actual vs Synthetic ({noise_type})", fontsize=14)
             plt.tight_layout(rect=[0, 0, 1, 0.93])
 
-            pdf_path = outcome_dir / f"{sid}_comparison_{noise_type}.pdf"
+            pdf_path = results_dir / f"{sid}_outcome_comparison_{noise_type}.pdf"
             fig.savefig(pdf_path, bbox_inches='tight')
             plt.close(fig)
             logging.info(f"[{sid}] Saved comparison PDF → {pdf_path.name}")
