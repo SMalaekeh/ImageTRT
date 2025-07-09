@@ -1,0 +1,3 @@
+# ignore the Results folders under those two dirs
+/Synthetic Data Generation/Results/
+/Model/Results/
