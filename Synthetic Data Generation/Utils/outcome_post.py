@@ -41,6 +41,12 @@ def generate_post(
     treatment_dir = results_dir / 'Treatment'
     outcome_dir   = results_dir / 'Outcome'
     ite_dir       = results_dir / 'ITE'
+    ite_dir_direct   = results_dir / 'ITE_Direct'
+    ite_dir_indirect = results_dir / 'ITE_Indirect'
+    ite_dir_total = results_dir / 'ITE_Total'
+    ite_dir_direct.mkdir(parents=True, exist_ok=True)
+    ite_dir_indirect.mkdir(parents=True, exist_ok=True)
+    ite_dir_total.mkdir(parents=True, exist_ok=True)
     ite_dir.mkdir(parents=True, exist_ok=True)
     post_dir      = results_dir / 'Outcome_Post'
     post_dir.mkdir(parents=True, exist_ok=True)
@@ -82,9 +88,35 @@ def generate_post(
         # Compute upstream spillover on coarse grid
         KuT_up = upstream_only_KuT(treat, dem, KERNEL)
 
+        # ---------- ITE decomposition ----------
+        # 1) direct effect of i on itself
+        ITE_direct = theta * treat                    # (H,W)
+
+        # 2) spillover that i produces on *other* pixels -----------------
+        #    We need  S(i) = sum_{j : DEM[j] < DEM[i]}   theta[j] * K(d(i,j))
+        #    That is the same pattern as `upstream_only_KuT`
+        #    if we give it `theta` and *negated* DEM.
+        sum_down_theta = upstream_only_KuT(theta, -dem, KERNEL)  # (H,W)
+
+        ITE_indirect = treat * sum_down_theta         # only if i is treated
+        # ---------------------------------------------------------------
+
+        ITE_Total = ITE_direct + ITE_indirect
+
+        # save the three rasters
+        Image.fromarray(ITE_direct.astype(np.float32), mode='F').save(
+            ite_dir_direct / f"scene_{sid}_ITE_Pixel_Direct.tiff")
+
+        Image.fromarray(ITE_indirect.astype(np.float32), mode='F').save(
+            ite_dir_indirect / f"scene_{sid}_ITE_Pixel_Indirect.tiff")
+        
+        Image.fromarray(ITE_Total.astype(np.float32), mode='F').save(
+            ite_dir_total / f"scene_{sid}_ITE_Pixel_Total.tiff")
+        # ---------- ITE decomposition ----------
+
         # ITE & post outcome
         ITE  = theta * KuT_up
-        post = actual + ITE
+        post = actual + ITE + ITE_direct
         if noise_type == "gaussian":
             post += np.random.normal(0, noise_sd, size=post.shape)
         elif noise_type != "none":
@@ -102,8 +134,8 @@ def generate_post(
 
         # PDF compare
         if sid in pdf_ids:
-            # 3-panel: Baseline, ITE, Post
-            fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+            # 6-panel: Baseline, ITE-direct, ITE-indirect, ITE, Post
+            fig, axes = plt.subplots(1, 6, figsize=(16, 8))
 
             # Baseline
             im0 = axes[0].imshow(actual, cmap='viridis')
@@ -111,17 +143,35 @@ def generate_post(
             axes[0].axis('off')
             plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-            # ITE
-            im1 = axes[1].imshow(ITE, cmap='viridis')
-            axes[1].set_title('ITE')
+            # ITE-direct
+            im1 = axes[1].imshow(ITE_direct, cmap='viridis')
+            axes[1].set_title('ITE-direct')
             axes[1].axis('off')
             plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-            # Post
-            im2 = axes[2].imshow(post, cmap='viridis')
-            axes[2].set_title('Post')
+            # ITE-indirect
+            im2 = axes[2].imshow(ITE_indirect, cmap='viridis')
+            axes[2].set_title('ITE-indirect')
             axes[2].axis('off')
             plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+            
+            # ITE-Total
+            im3 = axes[3].imshow(ITE_Total, cmap='viridis')
+            axes[3].set_title('ITE-Total')
+            axes[3].axis('off')
+            plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
+
+            # ITE
+            im4 = axes[4].imshow(ITE, cmap='viridis')
+            axes[4].set_title('Total Spillover Impact')
+            axes[4].axis('off')
+            plt.colorbar(im4, ax=axes[4], fraction=0.046, pad=0.04)
+
+            # Post
+            im5 = axes[5].imshow(post, cmap='viridis')
+            axes[5].set_title('Post')
+            axes[5].axis('off')
+            plt.colorbar(im5, ax=axes[5], fraction=0.046, pad=0.04)
 
             fig.suptitle(f"{sid}: Baseline, ITE & Post (coarse {coarse_shape})", fontsize=12)
             plt.tight_layout(rect=[0, 0, 1, 0.9])

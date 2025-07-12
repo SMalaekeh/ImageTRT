@@ -84,7 +84,7 @@ def generate_synthetic_treatment(
 
         # save synthetic TIFF
         out_tif = treatment_dir / f"scene_{sid}_synthetic_{noise_type}.tiff"
-        Image.fromarray((synth * 255).astype(np.uint8)).save(out_tif)
+        Image.fromarray((synth).astype(np.uint8)).save(out_tif)
 
         # save a PDF comparison for a few scenes
         if sid in pdf_ids:

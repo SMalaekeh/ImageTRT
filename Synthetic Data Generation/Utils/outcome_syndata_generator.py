@@ -44,16 +44,14 @@ def generate_synthetic_outcome(
                               target_shape, Image.BILINEAR)
         c96 = load_and_resize(Path(folders['claims_96']) / f"LOG_CLAIMS_1996_{sid}.tiff",
                               target_shape, Image.NEAREST)
-        c16 = load_and_resize(Path(folders['claims_16']) / f"LOG_CLAIMS_2016_{sid}.tiff",
-                              target_shape, Image.NEAREST)
 
         # skip if any loading failed
-        if any(x is None for x in (dem, cap, c96, c16)):
+        if any(x is None for x in (dem, cap, c96)):
             logging.warning(f"Skipping {sid}: failed to load inputs")
             continue
 
         # actual continuous outcome
-        actual = (c16 - c96).astype(np.float32)
+        actual = (c96).astype(np.float32)
 
         # predict via pipeline
         X_scene = np.column_stack([dem.ravel(), cap.ravel()])
