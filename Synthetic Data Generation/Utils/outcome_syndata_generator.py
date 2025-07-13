@@ -14,7 +14,8 @@ def generate_synthetic_outcome(
     target_shape: tuple[int, int] = (256, 256),
     noise_type: str = "gaussian",   # "gaussian" or "none"
     noise_sd: float = 0.2,          # only for gaussian
-    results_dir: str | Path | None = None
+    results_dir: str | Path | None = None,
+    verbose: bool = True
 ) -> None:
     """
     Using a fitted regression pipeline (`reg_pipe`), generate and save:
@@ -25,8 +26,7 @@ def generate_synthetic_outcome(
     # --- setup directories ---
     results_dir = Path(results_dir) if results_dir else Path(
         os.path.expanduser(
-            '~/Library/CloudStorage/Box-Box/Caltech Research/Scripts/'
-            'ImageTRT/Synthetic Data Generation/Results'
+            '~/Library/CloudStorage/Box-Box/Hetwet_Data/Synthetic'
         )
     )
     outcome_dir = results_dir / 'Outcome'
@@ -43,7 +43,7 @@ def generate_synthetic_outcome(
         cap = load_and_resize(Path(folders['cap']) / f"CAPITAL_1996_{sid}.tiff",
                               target_shape, Image.BILINEAR)
         c96 = load_and_resize(Path(folders['claims_96']) / f"LOG_CLAIMS_1996_{sid}.tiff",
-                              target_shape, Image.NEAREST)
+                              target_shape, Image.BILINEAR)
 
         # skip if any loading failed
         if any(x is None for x in (dem, cap, c96)):
@@ -68,10 +68,11 @@ def generate_synthetic_outcome(
         pred = pred_flat.reshape(target_shape).astype(np.float32)
 
         # save synthetic as 32-bit TIFF
-        synth_tif  = outcome_dir / f"scene_{sid}_synthetic_{noise_type}.tiff"
+        synth_tif  = outcome_dir / f"outcome_scene_{sid}_{noise_type}.tiff"
         Image.fromarray(pred,   mode='F').save(synth_tif)
 
-        logging.info(f"[{sid}] Saved synthetic → {synth_tif.name}")
+        if verbose:
+            logging.info(f"[{sid}] Saved synthetic → {synth_tif.name}")
 
         # for a handful of scenes, also write a PDF compare
         if sid in pdf_ids:

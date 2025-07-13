@@ -37,8 +37,7 @@ def regression_process(
     # ——— Setup results dir ———
     if results_dir is None:
         base = (
-            '~/Library/CloudStorage/Box-Box/Caltech Research/Scripts/'
-            'ImageTRT/Synthetic Data Generation/Results'
+            '~/Library/CloudStorage/Box-Box/Hetwet_Data/Synthetic'
         )
         results_dir = Path(os.path.expanduser(base))
     else:
@@ -55,23 +54,25 @@ def regression_process(
         paths = {
             'dem':       Path(folders['dem'])       / f"DEM_{sid}.tiff",
             'cap':       Path(folders['cap'])       / f"CAPITAL_1996_{sid}.tiff",
-            'claims96':  Path(folders['claims_96']) / f"LOG_CLAIMS_1996_{sid}.tiff",
-            'claims16':  Path(folders['claims_16']) / f"LOG_CLAIMS_2016_{sid}.tiff",
+            'claims96':  Path(folders['claims_96']) / f"LOG_CLAIMS_1996_{sid}.tiff"
         }
 
         # resize rasters
         dem_r      = load_and_resize(paths['dem'],      target_shape, Image.BILINEAR)
         cap_r      = load_and_resize(paths['cap'],      target_shape, Image.BILINEAR)
-        claims96_r = load_and_resize(paths['claims96'], target_shape, Image.NEAREST)
-        claims16_r = load_and_resize(paths['claims16'], target_shape, Image.NEAREST)
-        if dem_r is None or cap_r is None or claims96_r is None or claims16_r is None:
+        claims96_r = load_and_resize(paths['claims96'], target_shape, Image.BILINEAR)
+
+        # Handle NaNs
+        claims96_r = np.nan_to_num(claims96_r, nan=0.0)
+
+        if dem_r is None or cap_r is None or claims96_r is None:
             logging.warning(f"Skipping {sid}: failed to load all inputs.")
             continue
 
         # flatten & compute outcome
         dem_list.append(dem_r.ravel())
         cap_list.append(cap_r.ravel())
-        log_outcome = (claims16_r - claims96_r).ravel()
+        log_outcome = (claims96_r).ravel()
         outcome_list.append(log_outcome)
 
     # design matrix & target
