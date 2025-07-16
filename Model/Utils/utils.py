@@ -39,6 +39,18 @@ def construct_filename(var: str, scene_id: Union[str, int]) -> str:
         return f"outcome_post_scene_{sid}_gaussian.tiff"
     elif var == 'theta':
         return f"Theta_scene_{sid}.tiff"
+    elif var == 'theta_directXout':
+        return f"Theta_DirectXout_scene_{sid}.tiff"
+    elif var == 'ite_direct':
+        return f"ITE_direct_scene_{sid}.tiff"
+    elif var == 'ITE_Outgoing':
+        return f"ITE_Outgoing_scene_{sid}.tiff"
+    elif var == 'ite_indirect':
+        return f"ITE_indirect_scene_{sid}.tiff"
+    elif var == 'ite_total':
+        return f"ITE_total_scene_{sid}.tiff"
+    elif var == 'theta_out':    
+        return f"Theta_scene_{sid}.tiff"
     elif var == 'dem':
         return f"DEM_{sid}.tiff"
     elif var == 'cap':
@@ -234,6 +246,75 @@ def compute_image_embeddings(
 
     return df
 
+def compute_multi_embeddings(
+    folders: Dict[str, Path],
+    scene_ids: List[Union[str,int]],
+    vars:     List[str],     # e.g. ['wet','dem','cap']
+    model:    nn.Module,
+    device:   Optional[torch.device]=None,
+    img_size: int    = 256,
+    output_dir: Optional[Path]=None
+) -> pd.DataFrame:
+    """
+    Compute a 3-channel embedding from the stack [wetland, DEM, Capital].
+    """
+
+    # transforms for the 3-channel PIL image
+    transform = transforms.Compose([
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485,0.456,0.406],  # ImageNet means
+            std =[0.229,0.224,0.225]   # ImageNet stds
+        ),
+    ])
+
+    records = []
+    for scene in tqdm(scene_ids, desc="Embedding stacked scenes"):
+        mats = []
+        for var in vars:
+            fp = folders[var] / construct_filename(var, str(scene))
+            if not fp.exists():
+                print(f"Missing {var} for scene {scene}")
+                break
+
+            # read & resize
+            with rasterio.open(fp) as src:
+                arr = src.read(1).astype('float32')
+            # resample to img_size using PIL:
+            im = Image.fromarray(arr)
+            im = im.resize((img_size,img_size), resample=Image.BILINEAR)
+            arr_r = np.array(im, dtype=np.float32)
+
+            # scale to [0,255]:
+            if var=='wet':
+                arr_r = arr_r * 255.0              # binary→255
+            else:
+                # DEM/CAP: min-max normalize per scene
+                mn, mx = arr_r.min(), arr_r.max()
+                arr_r = 255 * (arr_r - mn) / (mx - mn)
+
+            mats.append(arr_r)
+
+        else:
+            # only if no break
+            stacked = np.stack(mats, axis=0).astype('uint8')  # (3,H,W)
+            img      = Image.fromarray(np.moveaxis(stacked,0,-1))  # (H,W,3)
+            inp      = transform(img).unsqueeze(0)
+            if device:
+                inp = inp.to(device)
+            with torch.no_grad():
+                emb = model(inp).cpu().numpy().squeeze()
+
+            rec = {'scene_id': str(scene)}
+            rec.update({f'emb_{i}':float(v) for i,v in enumerate(emb)})
+            records.append(rec)
+
+    df = pd.DataFrame(records)
+    out_dir = Path(output_dir) if output_dir else Path.cwd()
+    out_dir.mkdir(exist_ok=True, parents=True)
+    df.to_csv(out_dir/f"stacked_embeddings.csv", index=False)
+    return df
 
 
 def combine_features(
