@@ -32,11 +32,13 @@ def construct_filename(var: str, scene_id: Union[str, int]) -> str:
     """
     sid = str(scene_id)
     if var == 'wet':
-        return f"scene_{sid}_synthetic_gaussian.tiff"
-    elif var == 'outcome':
-        return f"scene_{sid}_post_gaussian.tiff"
-    elif var == 'ite':
-        return f"scene_{sid}_ITE_Pixel_Total.tiff"
+        return f"treatment_scene_{sid}_gaussian.tiff"
+    elif var == 'outcome_pre':
+        return f"outcome_scene_{sid}_gaussian.tiff"
+    elif var == 'outcome_post':
+        return f"outcome_post_scene_{sid}_gaussian.tiff"
+    elif var == 'theta':
+        return f"Theta_scene_{sid}.tiff"
     elif var == 'dem':
         return f"DEM_{sid}.tiff"
     elif var == 'cap':
