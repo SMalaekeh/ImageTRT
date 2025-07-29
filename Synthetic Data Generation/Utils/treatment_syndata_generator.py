@@ -87,7 +87,7 @@ def generate_synthetic_treatment(
             raise ValueError(f"Unknown noise_type: {noise_type!r}")
 
         # Save synthetic TIFF
-        out_tif = treatment_dir / f"treatment_scene_{sid}_{noise_type}.tiff"
+        out_tif = treatment_dir / f"treatment_scene_{sid}.tiff"
         Image.fromarray(synth.astype(np.uint8)).save(out_tif)
 
         # Save visual comparison

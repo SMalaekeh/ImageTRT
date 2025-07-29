@@ -76,49 +76,33 @@ def upstream_only_KuT(T: np.ndarray, DEM: np.ndarray, theta: np.ndarray, K: np.n
 
     return S_up
 
-def downstream_only_KuT(T: np.ndarray, DEM: np.ndarray, theta: np.ndarray, K: np.ndarray) -> np.ndarray:
-    """
-    Compute the total outgoing ITE that each pixel i exerts on its downhill neighbors:
-      S_src(i) = theta[i]*T[i] * sum_{ j: DEM[j] < DEM[i] } K(d(i,j))
-
-    Parameters
-    ----------
-    T     : np.ndarray  # (H, W)  treatment indicator or intensity
-    DEM   : np.ndarray  # (H, W)  elevation field
-    theta : np.ndarray  # (H, W)  unit-specific treatment coefficient β(X)
-    K     : np.ndarray  # (2R+1, 2R+1) distance-decay kernel
-
-    Returns
-    -------
-    S_src : np.ndarray  # (H, W) outgoing‐spillover ITE from each pixel
-    """
+def downstream_only_KuT(T, DEM, theta, K):
     H, W = T.shape
     R    = K.shape[0] // 2
 
-    # Pad so we can extract full windows at the borders
+    # pad inputs…
     T_pad     = np.pad(T,     R, mode='constant', constant_values=0.0)
     theta_pad = np.pad(theta, R, mode='constant', constant_values=0.0)
     DEM_pad   = np.pad(DEM,   R, mode='edge')
 
-    S_src = np.zeros_like(T, dtype=np.float32)
+    # preallocate all three outputs
+    S_src            = np.zeros((H, W), dtype=np.float32)
+    Theta_out = np.zeros((H, W), dtype=np.float32)
+    W_sum            = np.zeros((H, W), dtype=np.float32)
 
     for i in range(H):
         for j in range(W):
-            # 1) read the center pixel's elevation, treatment & theta
             center_elev = DEM_pad[i+R, j+R]
             t_i         = T_pad[i+R, j+R]
             theta_i     = theta_pad[i+R, j+R]
 
-            # 2) neighbourhood of elevations
-            dem_patch = DEM_pad[i : i+2*R+1, j : j+2*R+1]
-
-            # 3) downhill mask (which neighbours j have DEM[j] < DEM[i])
+            dem_patch       = DEM_pad[i:i+2*R+1, j:j+2*R+1]
             downstream_mask = (dem_patch < center_elev).astype(np.float32)
+            w               = np.sum(K * downstream_mask)
 
-            # 4) sum up kernel weights over those downhill directions
-            weight_sum = np.sum(K * downstream_mask)
+            # store into each array at (i,j)
+            W_sum[i, j]            = w
+            Theta_out[i, j] = theta_i * w
+            S_src[i, j]            = theta_i * t_i * w
 
-            # 5) outgoing ITE = direct‐coefficient×treatment×total downhill weight
-            S_src[i, j] = theta_i * t_i * weight_sum
-
-    return S_src
+    return S_src, Theta_out, W_sum

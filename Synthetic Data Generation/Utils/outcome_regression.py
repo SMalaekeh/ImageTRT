@@ -17,11 +17,13 @@ def regression_process(
     results_dir: str | None = None,
     verbose: bool = True,
     noise_type: str = 'gaussian',      # 'gaussian' or 'none'
-    noise_sd: float = 0.2              # only used if noise_type=='gaussian'
+    noise_sd: float = 0.2,              # only used if noise_type=='gaussian',
+    scale: bool = False,
+    plot: bool = True
 ) -> Pipeline:
     """
     1) Loads DEM, capital, and two log-claims rasters (1996 & 2016) per scene.
-    2) Computes log_outcome = claims_16 - claims_96.
+    2) Computes log claims_96.
     3) Fits a linear regression: log_outcome ~ DEM + Capital.
     4) Saves coefficients.
     5) For the first scene, predicts (with optional Gaussian noise), and plots:
@@ -80,10 +82,16 @@ def regression_process(
     y = np.hstack(outcome_list)
 
     # ——— Build & train regression pipeline ———
-    pipe = Pipeline([
-        ('scaler', StandardScaler()),
-        ('linreg', LinearRegression())
-    ])
+    if scale:
+        pipe = Pipeline([
+            ('scaler', StandardScaler()),
+            ('linreg', LinearRegression())
+        ])
+    else:
+        pipe = Pipeline([
+            ('linreg', LinearRegression())
+        ])
+
     pipe.fit(X, y)
 
     # ——— Save coefficients ———
@@ -94,59 +102,61 @@ def regression_process(
     with open(coeff_file, 'w') as f:
         for name, val in zip(names, coefs):
             f.write(f"{name}: {val:.6f}\n")
+
     if verbose:
         logging.info(f"Coefficients saved to {coeff_file}")
 
-    # ——— Predict & Plot for first scene ———
-    sid = scene_ids[0]
-    dem_arr = dem_list[0]
-    cap_arr = cap_list[0]
-    actual_out = outcome_list[0]
+    if plot:
+        # ——— Predict & Plot for first scene ———
+        sid = scene_ids[0]
+        dem_arr = dem_list[0]
+        cap_arr = cap_list[0]
+        actual_out = outcome_list[0]
 
-    X_scene = np.column_stack([dem_arr, cap_arr])
-    pred = pipe.predict(X_scene)
+        X_scene = np.column_stack([dem_arr, cap_arr])
+        pred = pipe.predict(X_scene)
 
-    # add optional Gaussian noise
-    if noise_type.lower() == 'gaussian':
-        pred = pred + np.random.normal(0, noise_sd, size=pred.shape)
-    elif noise_type.lower() != 'none':
-        raise ValueError("noise_type must be 'gaussian' or 'none'")
+        # add optional Gaussian noise
+        if noise_type.lower() == 'gaussian':
+            pred = pred + np.random.normal(0, noise_sd, size=pred.shape)
+        elif noise_type.lower() != 'none':
+            raise ValueError("noise_type must be 'gaussian' or 'none'")
 
-    # reshape back to 2D maps
-    pred_map   = pred.reshape(target_shape)
-    actual_map = actual_out.reshape(target_shape)
-    dem_map    = dem_arr.reshape(target_shape)
-    cap_map    = cap_arr.reshape(target_shape)
+        # reshape back to 2D maps
+        pred_map   = pred.reshape(target_shape)
+        actual_map = actual_out.reshape(target_shape)
+        dem_map    = dem_arr.reshape(target_shape)
+        cap_map    = cap_arr.reshape(target_shape)
 
-    # plot
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
-    im0 = axes[0].imshow(pred_map)
-    axes[0].set_title(f"Predicted ΔLogClaims {sid}")
-    axes[0].axis('off')
-    plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        # plot
+        fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+        im0 = axes[0].imshow(pred_map)
+        axes[0].set_title(f"Predicted Claims 1996 {sid}")
+        axes[0].axis('off')
+        plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-    im1 = axes[1].imshow(actual_map)
-    axes[1].set_title(f"Actual ΔLogClaims {sid}")
-    axes[1].axis('off')
-    plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        im1 = axes[1].imshow(actual_map)
+        axes[1].set_title(f"Actual Claims 1996 {sid}")
+        axes[1].axis('off')
+        plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-    im2 = axes[2].imshow(dem_map)
-    axes[2].set_title(f"DEM {sid}")
-    axes[2].axis('off')
-    plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        im2 = axes[2].imshow(dem_map)
+        axes[2].set_title(f"DEM {sid}")
+        axes[2].axis('off')
+        plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
-    im3 = axes[3].imshow(cap_map)
-    axes[3].set_title(f"Capital {sid}")
-    axes[3].axis('off')
-    plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
+        im3 = axes[3].imshow(cap_map)
+        axes[3].set_title(f"Capital {sid}")
+        axes[3].axis('off')
+        plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
 
-    fig.suptitle(f"Scene {sid}: Continuous Outcome vs Inputs", fontsize=16)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.suptitle(f"Scene {sid}: Continuous Outcome vs Inputs", fontsize=16)
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    pdf_path = results_dir / f"scene_{sid}_continuous_outcome.pdf"
-    fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
-    plt.close(fig)
-    if verbose:
-        logging.info(f"Maps saved to {pdf_path}")
+        pdf_path = results_dir / f"scene_{sid}_continuous_outcome.pdf"
+        fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
+        plt.close(fig)
+        if verbose:
+            logging.info(f"Maps saved to {pdf_path}")
 
     return pipe

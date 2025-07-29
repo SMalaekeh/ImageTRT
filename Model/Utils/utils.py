@@ -32,15 +32,15 @@ def construct_filename(var: str, scene_id: Union[str, int]) -> str:
     """
     sid = str(scene_id)
     if var == 'wet':
-        return f"treatment_scene_{sid}_gaussian.tiff"
+        return f"treatment_scene_{sid}.tiff"
     elif var == 'outcome_pre':
-        return f"outcome_scene_{sid}_gaussian.tiff"
+        return f"outcome_scene_{sid}.tiff"
     elif var == 'outcome_post':
         return f"outcome_post_scene_{sid}_gaussian.tiff"
     elif var == 'theta':
         return f"Theta_scene_{sid}.tiff"
     elif var == 'theta_directXout':
-        return f"Theta_DirectXout_scene_{sid}.tiff"
+        return f"Theta_DirectXOutgoing_scene_{sid}.tiff"
     elif var == 'ite_direct':
         return f"ITE_direct_scene_{sid}.tiff"
     elif var == 'ITE_Outgoing':
@@ -49,8 +49,8 @@ def construct_filename(var: str, scene_id: Union[str, int]) -> str:
         return f"ITE_indirect_scene_{sid}.tiff"
     elif var == 'ite_total':
         return f"ITE_total_scene_{sid}.tiff"
-    elif var == 'theta_out':    
-        return f"Theta_scene_{sid}.tiff"
+    elif var == 'theta_outgoing':
+        return f"Theta_Outgoing_scene_{sid}.tiff"
     elif var == 'dem':
         return f"DEM_{sid}.tiff"
     elif var == 'cap':

@@ -7,6 +7,7 @@ from PIL import Image
 from Utils.load_and_resize import load_and_resize
 from Utils.convolution import upstream_only_KuT, downstream_only_KuT
 import matplotlib.pyplot as plt
+import joblib
 
 def to_coarse(arr256, target_shape=(8, 8), mode=Image.BILINEAR):
     """Resize a 256×256 NumPy array to an 8×8 array."""
@@ -21,10 +22,12 @@ def generate_post(
     Bbase: float,
     Beta1: float,
     Beta2: float,
+    scaler_path: str | Path | None = None,
     coarse_shape: tuple[int,int] = (8, 8),
     noise_type: str = "gaussian",    # "gaussian" or "none"
     noise_sd: float = 0.0,           # for Gaussian noise
-    results_dir: str | Path | None = None
+    results_dir: str | Path | None = None,
+    plot: bool = True
 ) -> None:
     """
     Simplified coarse‐resolution post‐outcome generator using only load_and_resize:
@@ -32,6 +35,12 @@ def generate_post(
       - Compute θ(x), KuT_up, ITE, then post = outcome + ITE (+ noise).
       - Save coarse TIFFs and comparison PDFs.
     """
+    if scaler_path is not None:
+        scaler = joblib.load(scaler_path)
+    else:
+        print("Using Actual Covariates (No Scaling)")
+    
+
     # Setup directories
     if results_dir is None:
         base = (
@@ -57,6 +66,10 @@ def generate_post(
     # Theta dir
     theta_dir      = results_dir / 'Theta'
     theta_dir.mkdir(parents=True, exist_ok=True)
+    theta_out_dir = results_dir / 'Theta_Outgoing'
+    theta_out_dir.mkdir(parents=True, exist_ok=True)
+    theta_directXout_dir = results_dir / 'Theta_DirectXOutgoing'
+    theta_directXout_dir.mkdir(parents=True, exist_ok=True)
 
     # Spillover Effect dirs
     ite_dir_outgoing    = results_dir / 'ITE_Outgoing'
@@ -74,8 +87,8 @@ def generate_post(
         paths = {
             'dem':     Path(folders['dem'])      / f"DEM_{sid}.tiff",
             'cap':     Path(folders['cap'])      / f"CAPITAL_1996_{sid}.tiff",
-            'treat':   treatment_dir            / f"treatment_scene_{sid}_gaussian.tiff",
-            'actual':  outcome_dir              / f"outcome_scene_{sid}_gaussian.tiff"
+            'treat':   treatment_dir            / f"treatment_scene_{sid}.tiff",
+            'actual':  outcome_dir              / f"outcome_scene_{sid}.tiff"
         }
 
         # changing the
@@ -98,11 +111,21 @@ def generate_post(
         treat = treat_r.astype(np.float32)
         actual = actual_r.astype(np.float32)
 
-        # Compute θ(x)
-        dem_safe = np.maximum(dem, 1.0)
-        theta = Bbase * (1.0
-                         + Beta1 * np.log1p(cap)
-                         + Beta2 / dem_safe)
+        if scaler_path is not None:
+            # Scale dem & cap using pre-fitted scaler
+            dem_cap = np.column_stack([dem.ravel(), cap.ravel()])
+            dem_cap_scaled = scaler.transform(dem_cap)
+            dem = dem_cap_scaled[:, 0].reshape(dem.shape)
+
+        # Compute θ(x) Inversely
+        # dem_safe = np.maximum(dem, 1.0)
+        # theta = Bbase * (1.0
+        #                  + Beta1 * cap
+        #                  + Beta2 / dem_safe)
+
+        theta = Bbase * (1 
+                         + Beta1 * cap 
+                         + Beta2 * dem)
 
         # Compute upstream spillover on coarse grid
         ITE_indirect = upstream_only_KuT(treat, dem, theta, KERNEL)
@@ -110,9 +133,9 @@ def generate_post(
         # ---------- ITE decomposition ----------
         # 1) direct effect of i on itself
         ITE_direct = theta * treat                    # (H,W)
-
+  
         # 2) spillover that i produces on *other* pixels -----------------
-        ITE_outgoing = downstream_only_KuT(treat, dem, theta, KERNEL)  # (H,W)
+        ITE_outgoing, theta_out, theta_directXout = downstream_only_KuT(treat, dem, theta, KERNEL)  # (H,W)
 
         # ---------------------------------------------------------------
 
@@ -124,6 +147,8 @@ def generate_post(
         ITE_Total    = to_coarse(ITE_Total,    coarse_shape, Image.BILINEAR)
         ITE_outgoing = to_coarse(ITE_outgoing,    coarse_shape, Image.BILINEAR)
         theta        = to_coarse(theta,        coarse_shape, Image.BILINEAR)
+        theta_out    = to_coarse(theta_out,    coarse_shape, Image.BILINEAR)
+        theta_directXout = to_coarse(theta_directXout, coarse_shape, Image.BILINEAR)
 
         # save the five rasters
         Image.fromarray(ITE_direct.astype(np.float32), mode='F').save(
@@ -140,6 +165,12 @@ def generate_post(
 
         Image.fromarray(theta.astype(np.float32), mode='F').save(
             theta_dir / f"Theta_scene_{sid}.tiff")
+
+        Image.fromarray(theta_out.astype(np.float32), mode='F').save(
+            theta_out_dir / f"Theta_Outgoing_scene_{sid}.tiff")
+        
+        Image.fromarray(theta_directXout.astype(np.float32), mode='F').save(
+            theta_directXout_dir / f"Theta_DirectXOutgoing_scene_{sid}.tiff")
         # ---------- ITE decomposition ----------
 
         # Post OUTCOME
@@ -155,51 +186,53 @@ def generate_post(
         Image.fromarray(post.astype(np.float32), mode='F').save(out_tif)
         logging.info(f"[{sid}] Saved post outcome coarse → {out_tif.name}")
 
-        # PDF compare
-        if sid in pdf_ids:
-            # 6-panel: Baseline, ITE-direct, ITE-indirect, ITE, Post
-            fig, axes = plt.subplots(1, 6, figsize=(16, 8))
 
-            # Baseline
-            im0 = axes[0].imshow(actual, cmap='viridis')
-            axes[0].set_title('Baseline')
-            axes[0].axis('off')
-            plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+        if plot:
+            # PDF compare
+            if sid in pdf_ids:
+                # 6-panel: Baseline, ITE-direct, ITE-indirect, ITE, Post
+                fig, axes = plt.subplots(1, 6, figsize=(16, 8))
 
-            # ITE-direct
-            im1 = axes[1].imshow(ITE_direct, cmap='viridis')
-            axes[1].set_title('ITE-direct')
-            axes[1].axis('off')
-            plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+                # Baseline
+                im0 = axes[0].imshow(actual, cmap='viridis')
+                axes[0].set_title('Baseline')
+                axes[0].axis('off')
+                plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
-            # ITE-indirect
-            im2 = axes[2].imshow(ITE_indirect, cmap='viridis')
-            axes[2].set_title('ITE-indirect')
-            axes[2].axis('off')
-            plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
-            
-            # ITE-Total
-            im3 = axes[3].imshow(ITE_Total, cmap='viridis')
-            axes[3].set_title('ITE-Total')
-            axes[3].axis('off')
-            plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
+                # ITE-direct
+                im1 = axes[1].imshow(ITE_direct, cmap='viridis')
+                axes[1].set_title('ITE-direct')
+                axes[1].axis('off')
+                plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-            # ITE
-            im4 = axes[4].imshow(ITE_outgoing, cmap='viridis')
-            axes[4].set_title('ITE Outgoing Effect')
-            axes[4].axis('off')
-            plt.colorbar(im4, ax=axes[4], fraction=0.046, pad=0.04)
+                # ITE-indirect
+                im2 = axes[2].imshow(ITE_indirect, cmap='viridis')
+                axes[2].set_title('ITE-indirect')
+                axes[2].axis('off')
+                plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+                
+                # ITE-Total
+                im3 = axes[3].imshow(ITE_Total, cmap='viridis')
+                axes[3].set_title('ITE-Total')
+                axes[3].axis('off')
+                plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
 
-            # Post
-            im5 = axes[5].imshow(post, cmap='viridis')
-            axes[5].set_title('Post')
-            axes[5].axis('off')
-            plt.colorbar(im5, ax=axes[5], fraction=0.046, pad=0.04)
+                # ITE
+                im4 = axes[4].imshow(ITE_outgoing, cmap='viridis')
+                axes[4].set_title('ITE Outgoing Effect')
+                axes[4].axis('off')
+                plt.colorbar(im4, ax=axes[4], fraction=0.046, pad=0.04)
 
-            fig.suptitle(f"{sid}: Baseline, ITE & Post (coarse {coarse_shape})", fontsize=12)
-            plt.tight_layout(rect=[0, 0, 1, 0.9])
-            pdf_path = results_dir / f"{sid}_pre_post_comparison_{noise_type}.pdf"
-            fig.savefig(pdf_path, bbox_inches='tight')
-            plt.close(fig)
-            logging.info(f"[{sid}] Saved comparison PDF → {pdf_path.name}")
+                # Post
+                im5 = axes[5].imshow(post, cmap='viridis')
+                axes[5].set_title('Post')
+                axes[5].axis('off')
+                plt.colorbar(im5, ax=axes[5], fraction=0.046, pad=0.04)
+
+                fig.suptitle(f"{sid}: Baseline, ITE & Post (coarse {coarse_shape})", fontsize=12)
+                plt.tight_layout(rect=[0, 0, 1, 0.9])
+                pdf_path = results_dir / f"{sid}_pre_post_comparison_{noise_type}.pdf"
+                fig.savefig(pdf_path, bbox_inches='tight')
+                plt.close(fig)
+                logging.info(f"[{sid}] Saved comparison PDF → {pdf_path.name}")
 

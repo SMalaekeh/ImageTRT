@@ -68,7 +68,7 @@ def generate_synthetic_outcome(
         pred = pred_flat.reshape(target_shape).astype(np.float32)
 
         # save synthetic as 32-bit TIFF
-        synth_tif  = outcome_dir / f"outcome_scene_{sid}_{noise_type}.tiff"
+        synth_tif  = outcome_dir / f"outcome_scene_{sid}.tiff"
         Image.fromarray(pred,   mode='F').save(synth_tif)
 
         if verbose:
@@ -78,19 +78,19 @@ def generate_synthetic_outcome(
         if sid in pdf_ids:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
             im1 = ax1.imshow(actual, cmap='viridis')
-            ax1.set_title(f"Actual ΔLogClaims {sid}")
+            ax1.set_title(f"Actual Baseline Log Claims {sid}")
             ax1.axis('off')
             plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
             im2 = ax2.imshow(pred, cmap='viridis')
-            ax2.set_title(f"Synthetic ΔLogClaims {sid}")
+            ax2.set_title(f"Synthetic Baseline Log Claims {sid}")
             ax2.axis('off')
             plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
 
             fig.suptitle(f"{sid}: Actual vs Synthetic ({noise_type})", fontsize=14)
             plt.tight_layout(rect=[0, 0, 1, 0.93])
 
-            pdf_path = results_dir / f"{sid}_outcome_comparison_{noise_type}.pdf"
+            pdf_path = results_dir / f"{sid}_outcome_comparison.pdf"
             fig.savefig(pdf_path, bbox_inches='tight')
             plt.close(fig)
             logging.info(f"[{sid}] Saved comparison PDF → {pdf_path.name}")

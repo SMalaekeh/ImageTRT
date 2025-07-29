@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from Utils.load_and_resize import load_and_resize
 import matplotlib.pyplot as plt
+import joblib
 
 def logistic_process(
     scene_ids: list[str],
@@ -21,7 +22,9 @@ def logistic_process(
     verbose: bool = True,
     noise_sd: float = 0.2,
     n_trials: int = 1,
-    noise_type: str = 'gaussian'
+    noise_type: str = 'gaussian',
+    plot: bool = True,
+    scale: bool = False
 ) -> Pipeline:
     """
     Train logistic regression on DEM, Capital, and their scene means to predict wetland development.
@@ -29,7 +32,7 @@ def logistic_process(
 
     Returns
     -------
-    Trained sklearn Pipeline (StandardScaler + LogisticRegression)
+    Trained sklearn Pipeline (StandardScaler (if scale) + LogisticRegression)
     """
     if verbose:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -91,17 +94,33 @@ def logistic_process(
     y = np.hstack(y_list)
 
     # Build and train pipeline
-    pipe = Pipeline([
-        ('scaler', StandardScaler()),
-        ('logreg', LogisticRegression(
-            penalty='l2',
-            C=regularization_C,
-            solver='lbfgs',
-            max_iter=1000,
-            class_weight='balanced',
-        ))
-    ])
-    pipe.fit(X, y)
+    if scale:
+        # Pipeline with Scaler
+        pipe = Pipeline([
+            ('scaler', StandardScaler()),
+            ('logreg', LogisticRegression(
+                penalty='l2',
+                C=regularization_C,
+                solver='lbfgs',
+                max_iter=1000,
+                class_weight='balanced',
+            ))
+        ])
+        # Saving the Scaler
+        scaler = pipe.named_steps['scaler']
+        joblib.dump(scaler, results_dir / 'treatment_scaler.pkl')
+    else:
+        pipe = Pipeline([
+            ('logreg', LogisticRegression(
+                penalty='l2',
+                C=regularization_C,
+                solver='lbfgs',
+                max_iter=1000,
+                class_weight='balanced',
+            ))
+        ])
+        
+    pipe.fit(X, y)  
 
     # Save coefficients
     lr = pipe.named_steps['logreg']
@@ -132,41 +151,42 @@ def logistic_process(
     else:
         raise ValueError(f"Unsupported noise type: {noise_type}")
 
-    # Generate maps
-    synthetic_map = (probs.reshape(target_shape) >= threshold).astype(np.uint8)
-    actual_map = wet_arr.reshape(target_shape)
-    dem_map = dem_arr.reshape(target_shape)
-    cap_map = cap_arr.reshape(target_shape)
+    if plot:
+        # Generate maps
+        synthetic_map = (probs.reshape(target_shape) >= threshold).astype(np.uint8)
+        actual_map = wet_arr.reshape(target_shape)
+        dem_map = dem_arr.reshape(target_shape)
+        cap_map = cap_arr.reshape(target_shape)
 
-    # Plot results
-    fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+        # Plot results
+        fig, axes = plt.subplots(1, 4, figsize=(16, 4))
 
-    axes[0].imshow(synthetic_map, cmap='gray')
-    axes[0].set_title(f"Predicted Wetland {scene_id}")
-    axes[0].axis('off')
+        axes[0].imshow(synthetic_map, cmap='gray')
+        axes[0].set_title(f"Predicted Wetland {scene_id}")
+        axes[0].axis('off')
 
-    axes[1].imshow(actual_map, cmap='gray')
-    axes[1].set_title(f"Actual Wetland {scene_id}")
-    axes[1].axis('off')
+        axes[1].imshow(actual_map, cmap='gray')
+        axes[1].set_title(f"Actual Wetland {scene_id}")
+        axes[1].axis('off')
 
-    im2 = axes[2].imshow(dem_map)
-    axes[2].set_title(f"DEM {scene_id}")
-    axes[2].axis('off')
-    plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        im2 = axes[2].imshow(dem_map)
+        axes[2].set_title(f"DEM {scene_id}")
+        axes[2].axis('off')
+        plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
-    im3 = axes[3].imshow(cap_map)
-    axes[3].set_title(f"Capital {scene_id}")
-    axes[3].axis('off')
-    plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
+        im3 = axes[3].imshow(cap_map)
+        axes[3].set_title(f"Capital {scene_id}")
+        axes[3].axis('off')
+        plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
 
-    fig.suptitle(f"Scene {scene_id}: Synthetic vs Actual and Inputs", fontsize=16)
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+        fig.suptitle(f"Scene {scene_id}: Synthetic vs Actual and Inputs", fontsize=16)
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
 
-    pdf_path = results_dir / f"scene_{scene_id}_treatment_maps.pdf"
-    fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
-    plt.close(fig)
+        pdf_path = results_dir / f"scene_{scene_id}_treatment_maps.pdf"
+        fig.savefig(pdf_path, format='pdf', bbox_inches='tight')
+        plt.close(fig)
 
-    if verbose:
-        logging.info(f"Maps saved to {pdf_path}")
+        if verbose:
+            logging.info(f"Maps saved to {pdf_path}")
 
     return pipe
