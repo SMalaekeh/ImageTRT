@@ -353,155 +353,147 @@ def combine_features(
     return combined
 
 
-# ----------------------------- Autoencoder utils -----------------------------
+# ======================= AUTOENCODER-ONLY UTILS =======================
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from typing import Optional
+from typing import Optional, Dict, List, Union
+import numpy as np
+import pandas as pd
+from pathlib import Path
+from PIL import Image
+import rasterio
+from tqdm import tqdm
 
-class ConvAE(nn.Module):
+class ConvAE1C(nn.Module):
     """
-    Simple convolutional autoencoder for 256x256, 3-channel tiles.
-    Encoder -> z (latent); Decoder reconstructs image from z.
+    1-channel convolutional autoencoder for binary masks.
+    Downsamples by 2 four times (H/16), so img_size must be divisible by 16 (e.g., 256).
+    Decoder outputs logits; use BCEWithLogitsLoss when training.
     """
-    def __init__(self, z_dim: int = 128, in_ch: int = 3):
+    def __init__(self, img_size: int = 256, z_dim: int = 128):
         super().__init__()
-        # ---- Encoder: 256 -> 128 -> 64 -> 32 -> 16 ----
-        self.enc = nn.Sequential(
-            nn.Conv2d(in_ch, 32, 4, 2, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(32, 64, 4, 2, 1),    nn.ReLU(inplace=True),
-            nn.Conv2d(64, 128, 4, 2, 1),   nn.ReLU(inplace=True),
-            nn.Conv2d(128, 256, 4, 2, 1),  nn.ReLU(inplace=True),
-        )
-        self.enc_fc = nn.Linear(16 * 16 * 256, z_dim)
+        assert img_size % 16 == 0, "img_size must be divisible by 16 (e.g., 256)"
+        h = img_size // 16
+        self.img_size = img_size
+        self.h = h
+        self.z_dim = z_dim
 
-        # ---- Decoder: z -> 16x16x256 -> 256x256x3 ----
-        self.dec_fc = nn.Linear(z_dim, 16 * 16 * 256)
+        # Encoder: 1 -> 32 -> 64 -> 128 -> 256 (feature maps), spatial: /2 each block
+        self.enc = nn.Sequential(
+            nn.Conv2d(1,   32, 4, 2, 1), nn.ReLU(inplace=True),  # H/2
+            nn.Conv2d(32,  64, 4, 2, 1), nn.ReLU(inplace=True),  # H/4
+            nn.Conv2d(64, 128, 4, 2, 1), nn.ReLU(inplace=True),  # H/8
+            nn.Conv2d(128,256, 4, 2, 1), nn.ReLU(inplace=True),  # H/16
+        )
+        self.enc_fc = nn.Linear(256 * h * h, z_dim)
+
+        # Decoder: z -> 256*h*h -> upsample back to H
+        self.dec_fc = nn.Linear(z_dim, 256 * h * h)
         self.dec = nn.Sequential(
-            nn.ConvTranspose2d(256, 128, 4, 2, 1), nn.ReLU(inplace=True),  # 16->32
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),  nn.ReLU(inplace=True),  # 32->64
-            nn.ConvTranspose2d(64, 32, 4, 2, 1),   nn.ReLU(inplace=True),  # 64->128
-            nn.ConvTranspose2d(32, 3, 4, 2, 1),    nn.Sigmoid()            # 128->256
+            nn.ConvTranspose2d(256,128,4,2,1), nn.ReLU(inplace=True),  # *2
+            nn.ConvTranspose2d(128,64, 4,2,1), nn.ReLU(inplace=True),  # *4
+            nn.ConvTranspose2d(64, 32, 4,2,1), nn.ReLU(inplace=True),  # *8
+            nn.ConvTranspose2d(32,  1,  4,2,1)                          # *16 -> logits
         )
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         h = self.enc(x)
-        h = h.view(h.size(0), -1)
-        z = self.enc_fc(h)
+        z = self.enc_fc(h.view(h.size(0), -1))
         return z  # (batch, z_dim)
 
-    def decode(self, z: torch.Tensor) -> torch.Tensor:
-        h = self.dec_fc(z).view(-1, 256, 16, 16)
-        x_hat = self.dec(h)
-        return x_hat  # (batch, 3, 256, 256)
+    def decode_logits(self, z: torch.Tensor) -> torch.Tensor:
+        h = self.dec_fc(z).view(-1, 256, self.h, self.h)
+        logits = self.dec(h)  # (batch, 1, H, W)
+        return logits
 
     def forward(self, x: torch.Tensor):
         z = self.encode(x)
-        x_hat = self.decode(z)
-        return x_hat, z
+        logits = self.decode_logits(z)
+        return logits, z
 
 
 def build_autoencoder_model(
+    *,
+    img_size: int = 256,
     z_dim: int = 128,
-    in_ch: int = 3,
     device: Optional[torch.device] = None,
-    weights_path: Optional[str] = None,
+    weights_path: Optional[Union[str, Path]] = None,
     eval_mode: bool = True,
 ) -> nn.Module:
     """
-    Create a ConvAE, optionally load weights, move to device, set eval().
+    Create a 1-channel AE, optionally load weights, move to device, set eval().
     """
-    ae = ConvAE(z_dim=z_dim, in_ch=in_ch)
-
+    ae = ConvAE1C(img_size=img_size, z_dim=z_dim)
     if weights_path is not None:
-        state = torch.load(weights_path, map_location="cpu")
+        state = torch.load(str(weights_path), map_location="cpu")
         ae.load_state_dict(state, strict=True)
-
     if device is not None:
         ae.to(device)
-
     if eval_mode:
         ae.eval()
-
     return ae
 
 
+@torch.no_grad()
 def compute_ae_embeddings(
     folders: Dict[str, Path],
     scene_ids: List[Union[str, int]],
-    var: str,
+    var: str,                         # e.g., 'wet'
     ae_model: nn.Module,
+    *,
     device: Optional[torch.device] = None,
     img_size: int = 256,
-    output_dir: Optional[Path] = None,
-    normalize: bool = False,
+    output_csv: Optional[Path] = None
 ) -> pd.DataFrame:
     """
-    Compute autoencoder latents (emb_*) for each TIFF in `folders[var]`.
+    Extract encoder latents (emb_*) for each single-band 0/1 TIFF.
 
-    Assumes your AE exposes `.encode(x)` and was trained on the same preprocessing.
-    If `normalize=True`, applies ImageNet Normalize—set this to match your AE training.
+    - Keeps values in [0,1]
+    - Resizes with NEAREST (preserve mask)
+    - Calls `ae_model.encode` on (1,1,H,W)
+    - Returns DataFrame and optionally writes CSV
     """
-    tx = [
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-    ]
-    if normalize:
-        tx.append(transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                       std=[0.229, 0.224, 0.225]))
-    transform = transforms.Compose(tx)
-
+    recs = []
     folder = folders[var]
-    records = []
 
-    for scene in tqdm(scene_ids, desc=f'AE-Embedding {var} scenes'):
-        scene_str = str(scene)
-        try:
-            filename = construct_filename(var, scene_str)
-        except ValueError as e:
-            print(f"[AE] Skipping unknown var: {var} — {e}")
-            continue
+    if device is not None:
+        ae_model.to(device)
+    ae_model.eval()
 
-        fp = folder / filename
+    for sid in tqdm(scene_ids, desc=f"AE-embedding {var}"):
+        sid_str = str(sid)
+        fp = folder / construct_filename(var, sid_str)
         if not fp.exists():
-            print(f"[AE] Missing file for var='{var}', scene='{scene_str}': {fp}")
+            print(f"[AE] missing file: {fp}")
             continue
 
         try:
             with rasterio.open(fp) as src:
-                arr = src.read().astype('float32')
-                # Match your CNN path: scale and make 3-ch if needed
-                arr *= 255.0
-                if arr.shape[0] == 1:
-                    arr = np.repeat(arr, 3, axis=0)
+                arr = src.read(1).astype("float32")  # (H,W), values 0/1
+            # Resize (if needed) with NEAREST to avoid fractional labels
+            img = Image.fromarray(arr)
+            if img.size != (img_size, img_size):
+                img = img.resize((img_size, img_size), resample=Image.NEAREST)
+            x = torch.from_numpy(np.array(img, dtype=np.float32))  # (H,W) in [0,1]
+            x = x.unsqueeze(0).unsqueeze(0)                        # (1,1,H,W)
+            if device is not None:
+                x = x.to(device)
 
-            img = Image.fromarray(np.moveaxis(arr, 0, -1).astype('uint8'))
-            inp = transform(img).unsqueeze(0)  # (1,3,H,W)
-            if device:
-                inp = inp.to(device)
+            z = ae_model.encode(x).squeeze().detach().cpu().numpy()  # (z_dim,)
 
-            with torch.no_grad():
-                z = ae_model.encode(inp).detach().cpu().numpy().squeeze()
+            row = {"scene_id": sid_str}
+            row.update({f"emb_{i}": float(v) for i, v in enumerate(z)})
+            recs.append(row)
 
         except Exception as e:
-            print(f"[AE] Failed to process {fp}: {e}")
+            print(f"[AE] failed {sid_str}: {e}")
             continue
 
-        rec = {'scene_id': scene_str}
-        for i, val in enumerate(z):
-            rec[f'emb_{i}'] = float(val)
-        records.append(rec)
-
-    df = pd.DataFrame(records)
-
-    out_dir = Path(output_dir) if output_dir else Path.cwd()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f'{var}_ae_embeddings.csv'
-    df.to_csv(out_path, index=False)
-    print(f"Saved AE embeddings to: {out_path}")
-
+    df = pd.DataFrame(recs)
+    if output_csv is not None:
+        output_csv.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(output_csv, index=False)
+        print(f"Saved AE embeddings to: {output_csv}")
     return df
-
-
-
+# ===================== END AUTOENCODER-ONLY UTILS =====================
