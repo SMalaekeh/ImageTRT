@@ -353,3 +353,155 @@ def combine_features(
     return combined
 
 
+# ----------------------------- Autoencoder utils -----------------------------
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Optional
+
+class ConvAE(nn.Module):
+    """
+    Simple convolutional autoencoder for 256x256, 3-channel tiles.
+    Encoder -> z (latent); Decoder reconstructs image from z.
+    """
+    def __init__(self, z_dim: int = 128, in_ch: int = 3):
+        super().__init__()
+        # ---- Encoder: 256 -> 128 -> 64 -> 32 -> 16 ----
+        self.enc = nn.Sequential(
+            nn.Conv2d(in_ch, 32, 4, 2, 1), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, 4, 2, 1),    nn.ReLU(inplace=True),
+            nn.Conv2d(64, 128, 4, 2, 1),   nn.ReLU(inplace=True),
+            nn.Conv2d(128, 256, 4, 2, 1),  nn.ReLU(inplace=True),
+        )
+        self.enc_fc = nn.Linear(16 * 16 * 256, z_dim)
+
+        # ---- Decoder: z -> 16x16x256 -> 256x256x3 ----
+        self.dec_fc = nn.Linear(z_dim, 16 * 16 * 256)
+        self.dec = nn.Sequential(
+            nn.ConvTranspose2d(256, 128, 4, 2, 1), nn.ReLU(inplace=True),  # 16->32
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),  nn.ReLU(inplace=True),  # 32->64
+            nn.ConvTranspose2d(64, 32, 4, 2, 1),   nn.ReLU(inplace=True),  # 64->128
+            nn.ConvTranspose2d(32, 3, 4, 2, 1),    nn.Sigmoid()            # 128->256
+        )
+
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.enc(x)
+        h = h.view(h.size(0), -1)
+        z = self.enc_fc(h)
+        return z  # (batch, z_dim)
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        h = self.dec_fc(z).view(-1, 256, 16, 16)
+        x_hat = self.dec(h)
+        return x_hat  # (batch, 3, 256, 256)
+
+    def forward(self, x: torch.Tensor):
+        z = self.encode(x)
+        x_hat = self.decode(z)
+        return x_hat, z
+
+
+def build_autoencoder_model(
+    z_dim: int = 128,
+    in_ch: int = 3,
+    device: Optional[torch.device] = None,
+    weights_path: Optional[str] = None,
+    eval_mode: bool = True,
+) -> nn.Module:
+    """
+    Create a ConvAE, optionally load weights, move to device, set eval().
+    """
+    ae = ConvAE(z_dim=z_dim, in_ch=in_ch)
+
+    if weights_path is not None:
+        state = torch.load(weights_path, map_location="cpu")
+        ae.load_state_dict(state, strict=True)
+
+    if device is not None:
+        ae.to(device)
+
+    if eval_mode:
+        ae.eval()
+
+    return ae
+
+
+def compute_ae_embeddings(
+    folders: Dict[str, Path],
+    scene_ids: List[Union[str, int]],
+    var: str,
+    ae_model: nn.Module,
+    device: Optional[torch.device] = None,
+    img_size: int = 256,
+    output_dir: Optional[Path] = None,
+    normalize: bool = False,
+) -> pd.DataFrame:
+    """
+    Compute autoencoder latents (emb_*) for each TIFF in `folders[var]`.
+
+    Assumes your AE exposes `.encode(x)` and was trained on the same preprocessing.
+    If `normalize=True`, applies ImageNet Normalize—set this to match your AE training.
+    """
+    tx = [
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+    ]
+    if normalize:
+        tx.append(transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                       std=[0.229, 0.224, 0.225]))
+    transform = transforms.Compose(tx)
+
+    folder = folders[var]
+    records = []
+
+    for scene in tqdm(scene_ids, desc=f'AE-Embedding {var} scenes'):
+        scene_str = str(scene)
+        try:
+            filename = construct_filename(var, scene_str)
+        except ValueError as e:
+            print(f"[AE] Skipping unknown var: {var} — {e}")
+            continue
+
+        fp = folder / filename
+        if not fp.exists():
+            print(f"[AE] Missing file for var='{var}', scene='{scene_str}': {fp}")
+            continue
+
+        try:
+            with rasterio.open(fp) as src:
+                arr = src.read().astype('float32')
+                # Match your CNN path: scale and make 3-ch if needed
+                arr *= 255.0
+                if arr.shape[0] == 1:
+                    arr = np.repeat(arr, 3, axis=0)
+
+            img = Image.fromarray(np.moveaxis(arr, 0, -1).astype('uint8'))
+            inp = transform(img).unsqueeze(0)  # (1,3,H,W)
+            if device:
+                inp = inp.to(device)
+
+            with torch.no_grad():
+                z = ae_model.encode(inp).detach().cpu().numpy().squeeze()
+
+        except Exception as e:
+            print(f"[AE] Failed to process {fp}: {e}")
+            continue
+
+        rec = {'scene_id': scene_str}
+        for i, val in enumerate(z):
+            rec[f'emb_{i}'] = float(val)
+        records.append(rec)
+
+    df = pd.DataFrame(records)
+
+    out_dir = Path(output_dir) if output_dir else Path.cwd()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f'{var}_ae_embeddings.csv'
+    df.to_csv(out_path, index=False)
+    print(f"Saved AE embeddings to: {out_path}")
+
+    return df
+
+
+
