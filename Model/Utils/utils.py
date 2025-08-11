@@ -497,3 +497,26 @@ def compute_ae_embeddings(
         print(f"Saved AE embeddings to: {output_csv}")
     return df
 # ===================== END AUTOENCODER-ONLY UTILS =====================
+
+import rasterio, numpy as np, torch
+from torch.utils.data import Dataset, DataLoader
+from PIL import Image
+
+class WetMaskDataset(Dataset):
+    def __init__(self, folders, scene_ids, var="wet", img_size=256):
+        self.paths = []
+        self.img_size = img_size
+        folder = folders[var]
+        for sid in scene_ids:
+            fp = folder / construct_filename(var, str(sid))
+            if fp.exists(): self.paths.append((str(sid), fp))
+    def __len__(self): return len(self.paths)
+    def __getitem__(self, i):
+        sid, fp = self.paths[i]
+        with rasterio.open(fp) as src:
+            arr = src.read(1).astype("float32")          # 0/1
+        img = Image.fromarray(arr)
+        if img.size != (self.img_size, self.img_size):
+            img = img.resize((self.img_size, self.img_size), Image.NEAREST)
+        x = torch.from_numpy(np.array(img, dtype=np.float32)).unsqueeze(0)  # (1,H,W) in [0,1]
+        return sid, x

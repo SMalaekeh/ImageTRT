@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import fftconvolve
 
-def make_exp_kernel(lam_m, cell_size_m, truncate=4):
+def make_exp_kernel(lam_m, cell_size_m, truncate=4, rho = 1):
     """
     Build a normalized 2D exponential‐decay kernel:
       K(d) = exp(−d/lam_m), truncated at 4·lam_m.
@@ -10,7 +10,8 @@ def make_exp_kernel(lam_m, cell_size_m, truncate=4):
     y, x = np.ogrid[-R:R+1, -R:R+1]
     d    = np.hypot(x, y) * cell_size_m
     K    = np.exp(-d/lam_m)
-    K   /= K.sum()
+    K   /= K.sum() 
+    K   *= rho
     return K
 
 
@@ -41,7 +42,7 @@ def upstream_only_KuT(T: np.ndarray, DEM: np.ndarray, theta: np.ndarray, K: np.n
     Parameters
     ----------
     T : np.ndarray          # (H, W)  binary or continuous treatment
-    DEM : np.ndarray        # (H, W)  elevations
+    DEM : np.ndarray        #lam (H, W)  elevations
     theta : np.ndarray      # (H, W)  unit-specific coefficients β(X)
     K : np.ndarray          # (2R+1, 2R+1) distance-decay kernel
 
