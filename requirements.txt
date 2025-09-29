@@ -1,0 +1,11 @@
+tensorrt>=8.6.0; platform_system == "Linux"
+onnx>=1.16.0
+onnxruntime-gpu
+timm
+lightning
+numpy
+pandas
+scikit-learn
+pillow
+matplotlib
+tqdm

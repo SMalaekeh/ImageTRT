@@ -1,0 +1,26 @@
+name: imagetrt
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - pytorch
+  - torchvision
+  - pytorch-cuda=12.1  # comment if CPU only
+  - pip
+  - pip:
+      - tensorrt>=8.6.0; platform_system == "Linux"
+      - onnx>=1.16.0
+      - onnxruntime-gpu
+      - timm
+      - lightning
+      - numpy
+      - pandas
+      - scikit-learn
+      - pillow
+      - matplotlib
+      - tqdm
+      - ruff
+      - black
+      - pytest
