@@ -8,7 +8,7 @@ This cleanup pack gives you:
 - Pre-commit hooks (ruff, black)
 - Issue/PR templates, CONTRIBUTING, and a minimal **model card**
 
-> Author: **Sayedmorteza Malaekeh (Ali)**
+> Author: **Sayedmorteza Malaekeh**
 
 ## Quick Start
 ```bash
